@@ -8,4 +8,4 @@ Each subfolder is a self-contained project.
 
 | Folder | What it is | Status |
 |--------|-----------|--------|
-| [window-opener](window-opener/) | Motorized window opener exposed to HA as a `cover` | 🚧 scaffolding |
+| [window-opener](window-opener/) | Motorized window opener exposed to HA as a `cover` (first unit `windowsopenerbedroom1`, Bedroom) | 🛒 parts ordered |
