@@ -40,13 +40,35 @@ So in the HA `cover`: close = R1 on / R2 off; open = R1 off / R2 on; stop = both
 
 **HA entity:** `windowsopenerbedroom1`, area **Bedroom** (naming scheme implies multiple units — bedroom1, bedroom2, …).
 
+## Home Assistant (built)
+
+Paired in Z2M as **two `light` entities** (not a native cover):
+- `light.windowopenerbedroom1_light` = Relay 1 → **CLOSE**
+- `light.windowopenerbedroom1_light_2` = Relay 2 → **OPEN**
+
+A template `cover` (`cover.windows_opener_bedroom_1`) + temperature automations + input helpers
+are in [`ha/windowsopenerbedroom1.package.yaml`](ha/windowsopenerbedroom1.package.yaml) (drop in
+`config/packages/`). Temperature source: `sensor.invisoutlet_temperature` (InvisMasterBath ensuite).
+
+## ⚠️ Critical: end stops — see [END_STOPS.md](END_STOPS.md)
+
+Full travel ≈ **3 minutes**, and the controller has **no limit detection**. The HA timer is the
+only software stop; if it's interrupted mid-travel the motor runs into the limit and burns out /
+strips the gearing. Mechanical limit switches were **ruled out** (too hard to fit). Chosen
+direction: **current-based stall cutoff + hard max-runtime timer** — best done with a small
+ESP32/ESPHome controller (replaces the Tuya module). Until fitted: supervised runs only.
+
 ## Open items / decisions
 
-- **End stops** — BOM is open-loop (no limit switch/encoder). Worm gear *holds* position but won't stop a stall at the travel limits. Pick one: inline **limit switches**, controller **travel-time calibration**, or **stall-current** cutoff. Affects wiring — decide before mounting.
-- **HA representation** — confirm how the controller pairs in Z2M: native **cover** (with calibration) vs **two switches** (then wrap in a `cover` template + travel time). Verify exact model after pairing.
-- **Power** — confirm 12V PSU current headroom for motor stall.
-- **Mechanical** — confirm coupling bore vs the 6–12mm shaft; mounting/alignment for the flexible coupling.
+- **End-stop implementation** — DECIDE: ESP32 + ESPHome `current_based` cover (recommended) vs dumb overcurrent + timer modules. If ESPHome, the Tuya module is replaced and the HA package below is superseded by an ESPHome cover.
+- **Confirm relay direction** — (Tuya path) verify R1=close / R2=open by one supervised jog.
+- **Confirm temp sensor** — MasterBath (`sensor.invisoutlet_temperature`) vs SpareBath (`_2`); set thresholds.
+- **Measure travel time / stall current** — needed to tune cutoff + max_duration.
+- **Enclosure dims** — measure motor + controller (+ ESP, if added) for the 3D-printed housing.
 
 ## Status
 
-🛒 Parts ordered (2026-06-30), delivery ~Jul 8–15. Approach decided: Zigbee/Tuya → Z2M → HA cover. Build pending parts arrival.
+🔧 Assembled & paired in HA; temp source = InvisMasterBath. HA package written (Tuya template
+cover + temp automation) as an interim/supervised path. **Blocked on end-stop method decision**
+(current-cutoff via ESPHome vs modules) before unattended use. Enclosure: 3D-printed, parametric
+model pending part measurements.

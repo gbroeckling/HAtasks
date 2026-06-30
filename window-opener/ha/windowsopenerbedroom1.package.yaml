@@ -1,0 +1,123 @@
+# Home Assistant package for windowsopenerbedroom1
+# ---------------------------------------------------------------------------
+# Deploy: drop this file in  config/packages/  and make sure configuration.yaml has:
+#   homeassistant:
+#     packages: !include_dir_named packages
+# Then Developer Tools -> YAML -> Reload (template, automations, input helpers) or restart.
+#
+# Hardware: Tuya/Zigbee 2-ch controller paired in Z2M as two `light` entities.
+#   light.windowopenerbedroom1_light    = Relay 1 -> CLOSE
+#   light.windowopenerbedroom1_light_2  = Relay 2 -> OPEN
+#   (VERIFY direction once by jogging — if reversed, swap the two entity_ids below.)
+# Open-loop (no position feedback). Worm gear self-locks, so "stop" = both relays off.
+#
+# !!! SAFETY — READ BEFORE RELYING ON THIS !!!
+# Full travel is ~180 s. The HA `delay` below is the ONLY thing stopping the motor.
+# If HA restarts / Zigbee drops / the delay is interrupted mid-travel, the relay stays
+# latched and the motor drives into the end stop -> burned motor or stripped gearing.
+# THE SOFTWARE TIMER IS NOT A SAFE END STOP. Fit mechanical limit switches + bypass
+# diodes at each travel limit (hardware backstop, independent of HA). See ../END_STOPS.md.
+# Until those are fitted, treat every run as supervised and keep travel time < full travel.
+# ---------------------------------------------------------------------------
+
+input_number:
+  windowsopenerbedroom1_travel:
+    name: Bedroom1 Window travel time
+    min: 1
+    max: 300
+    step: 1
+    unit_of_measurement: s
+    icon: mdi:timer
+    # MEASURE: seconds for a full close->open at 5 RPM. Set after first jog.
+  windowsopenerbedroom1_open_above:
+    name: Bedroom1 Window open above
+    min: 10
+    max: 35
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-high
+  windowsopenerbedroom1_close_below:
+    name: Bedroom1 Window close below
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-low
+
+template:
+  - cover:
+      - name: "Windows Opener Bedroom 1"
+        unique_id: windowsopenerbedroom1
+        device_class: window
+        optimistic: true            # no feedback: assume state from last command
+        open_cover:
+          - service: light.turn_off                                   # interlock: close relay OFF first
+            target: { entity_id: light.windowopenerbedroom1_light }
+          - service: light.turn_on                                    # open relay ON
+            target: { entity_id: light.windowopenerbedroom1_light_2 }
+          - delay:
+              seconds: "{{ states('input_number.windowsopenerbedroom1_travel') | int(180) }}"
+          - service: light.turn_off                                   # auto-stop at end of travel
+            target: { entity_id: light.windowopenerbedroom1_light_2 }
+        close_cover:
+          - service: light.turn_off                                   # interlock: open relay OFF first
+            target: { entity_id: light.windowopenerbedroom1_light_2 }
+          - service: light.turn_on                                    # close relay ON
+            target: { entity_id: light.windowopenerbedroom1_light }
+          - delay:
+              seconds: "{{ states('input_number.windowsopenerbedroom1_travel') | int(180) }}"
+          - service: light.turn_off
+            target: { entity_id: light.windowopenerbedroom1_light }
+        stop_cover:
+          - service: light.turn_off
+            target:
+              entity_id:
+                - light.windowopenerbedroom1_light
+                - light.windowopenerbedroom1_light_2
+
+automation:
+  # Safety: never leave both relays energised (the forbidden R1+R2 state)
+  - alias: "Bedroom1 Window - relays off on HA start"
+    id: windowsopenerbedroom1_init
+    trigger:
+      - platform: homeassistant
+        event: start
+    action:
+      - service: light.turn_off
+        target:
+          entity_id:
+            - light.windowopenerbedroom1_light
+            - light.windowopenerbedroom1_light_2
+    mode: single
+
+  - alias: "Bedroom1 Window - open when warm"
+    id: windowsopenerbedroom1_open_warm
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.invisoutlet_temperature   # InvisMasterBath (ensuite); use _2 for SpareBath        # <-- set to your bedroom temperature sensor
+        above: input_number.windowsopenerbedroom1_open_above
+        for: "00:05:00"
+    condition:
+      - condition: state
+        entity_id: cover.windows_opener_bedroom_1
+        state: closed
+    action:
+      - service: cover.open_cover
+        target: { entity_id: cover.windows_opener_bedroom_1 }
+    mode: single
+
+  - alias: "Bedroom1 Window - close when cool"
+    id: windowsopenerbedroom1_close_cool
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.invisoutlet_temperature   # InvisMasterBath (ensuite); use _2 for SpareBath        # <-- same bedroom temperature sensor
+        below: input_number.windowsopenerbedroom1_close_below
+        for: "00:05:00"
+    condition:
+      - condition: state
+        entity_id: cover.windows_opener_bedroom_1
+        state: open
+    action:
+      - service: cover.close_cover
+        target: { entity_id: cover.windows_opener_bedroom_1 }
+    mode: single
