@@ -25,7 +25,18 @@ Still needed: 12V DC power supply (sized to motor stall current), mounting brack
               Z2M (SLZB-06 @ 192.168.1.180) ──► Home Assistant `cover`
 ```
 
-Single reversible motor wired across the two channels: CH1 = open polarity, CH2 = close polarity (interlocked). No ESP board — control is Zigbee via the existing Z2M coordinator.
+Single reversible motor wired across the two channels (interlocked). No ESP board — control is Zigbee via the existing Z2M coordinator.
+
+**Relay truth table (measured):**
+
+| Relay 1 | Relay 2 | Action |
+|---------|---------|--------|
+| ON | OFF | **Close** |
+| OFF | ON | **Open** |
+| OFF | OFF | Stop / hold (worm gear self-locks) |
+| ON | ON | ⛔ never — must be interlocked out |
+
+So in the HA `cover`: close = R1 on / R2 off; open = R1 off / R2 on; stop = both off. Never drive both relays on simultaneously.
 
 **HA entity:** `windowsopenerbedroom1`, area **Bedroom** (naming scheme implies multiple units — bedroom1, bedroom2, …).
 
