@@ -1,0 +1,23 @@
+# secrets / local config
+secrets.yaml
+.env
+*.key
+*.pem
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# esphome build artifacts
+.esphome/
+*.bin
+
+# editor / os
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
