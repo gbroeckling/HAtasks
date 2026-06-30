@@ -30,6 +30,10 @@ input_boolean:
     name: Bedroom1 Window automation enable
     icon: mdi:window-open-variant
     # KEEP OFF until the hardware overcurrent cutoff is fitted (see END_STOPS.md).
+  windowsopenerbedroom1_manual_today:
+    name: Bedroom1 Window manually controlled today
+    icon: mdi:hand-back-right
+    # Set when a person operates the window; pauses the temp automation until midnight.
 
 input_number:
   windowsopenerbedroom1_travel:
@@ -122,6 +126,9 @@ automation:
         entity_id: input_boolean.windowsopenerbedroom1_auto
         state: "on"
       - condition: state
+        entity_id: input_boolean.windowsopenerbedroom1_manual_today   # paused if manually controlled today
+        state: "off"
+      - condition: state
         entity_id: cover.windows_opener_bedroom_1
         state: closed
       - condition: numeric_state
@@ -150,6 +157,9 @@ automation:
         entity_id: input_boolean.windowsopenerbedroom1_auto
         state: "on"
       - condition: state
+        entity_id: input_boolean.windowsopenerbedroom1_manual_today   # paused if manually controlled today
+        state: "off"
+      - condition: state
         entity_id: cover.windows_opener_bedroom_1
         state: open
       - condition: or                                 # outside hot (20..40) OR cold (-40..15)
@@ -167,4 +177,34 @@ automation:
     action:
       - service: cover.close_cover
         target: { entity_id: cover.windows_opener_bedroom_1 }
+    mode: single
+
+  # If a PERSON operates the window (dashboard / voice / app / toggling the relays),
+  # latch "manual today" so the temp automation backs off until midnight.
+  # (Detected via context.user_id — automation-driven changes have no user_id and won't trip it.
+  #  Note: an RF433-remote press that never reaches HA can't be detected.)
+  - alias: "Bedroom1 Window - manual control pauses auto for the day"
+    id: windowsopenerbedroom1_manual_detect
+    trigger:
+      - platform: state
+        entity_id:
+          - cover.windows_opener_bedroom_1
+          - light.windowopenerbedroom1_light
+          - light.windowopenerbedroom1_light_2
+    condition:
+      - condition: template
+        value_template: "{{ trigger.to_state.context.user_id is not none }}"
+    action:
+      - service: input_boolean.turn_on
+        target: { entity_id: input_boolean.windowsopenerbedroom1_manual_today }
+    mode: single
+
+  - alias: "Bedroom1 Window - reset manual override at midnight"
+    id: windowsopenerbedroom1_manual_reset
+    trigger:
+      - platform: time
+        at: "00:00:00"
+    action:
+      - service: input_boolean.turn_off
+        target: { entity_id: input_boolean.windowsopenerbedroom1_manual_today }
     mode: single
