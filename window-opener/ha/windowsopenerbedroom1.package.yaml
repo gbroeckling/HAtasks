@@ -11,14 +11,25 @@
 #   (VERIFY direction once by jogging — if reversed, swap the two entity_ids below.)
 # Open-loop (no position feedback). Worm gear self-locks, so "stop" = both relays off.
 #
-# !!! SAFETY — READ BEFORE RELYING ON THIS !!!
-# Full travel is ~180 s. The HA `delay` below is the ONLY thing stopping the motor.
-# If HA restarts / Zigbee drops / the delay is interrupted mid-travel, the relay stays
-# latched and the motor drives into the end stop -> burned motor or stripped gearing.
-# THE SOFTWARE TIMER IS NOT A SAFE END STOP. Fit mechanical limit switches + bypass
-# diodes at each travel limit (hardware backstop, independent of HA). See ../END_STOPS.md.
-# Until those are fitted, treat every run as supervised and keep travel time < full travel.
+# !!! SAFETY — READ BEFORE ENABLING AUTOMATION !!!
+# Full travel is ~180 s and there is NO end-stop detection yet. The HA `delay` is the only
+# software stop; if it's interrupted mid-travel the motor drives into the limit -> destroyed
+# window. Fit the inline analog overcurrent cutoff (see ../END_STOPS.md) BEFORE turning on
+# input_boolean.windowsopenerbedroom1_auto. Until then, operate the cover supervised only.
+#
+# Temperature logic (per Garry):
+#   OPEN  when bath > 27 C  AND outside 15..25 C
+#   CLOSE when bath <= 20 C AND (outside 20..40 C  OR  outside -40..15 C)   [the 15..20 band stays open]
+# Bath temp   = sensor.invisoutlet_temperature  (InvisMasterBath ensuite)
+# Outside temp= weather.forecast_home (attribute temperature). NOTE: physical "Entry outside Temp"
+#   (sensor.0xa4c13804dd53ffff_temperature) reads a bogus 2.4 C — looks broken; swap back when fixed.
 # ---------------------------------------------------------------------------
+
+input_boolean:
+  windowsopenerbedroom1_auto:
+    name: Bedroom1 Window automation enable
+    icon: mdi:window-open-variant
+    # KEEP OFF until the hardware overcurrent cutoff is fitted (see END_STOPS.md).
 
 input_number:
   windowsopenerbedroom1_travel:
@@ -26,21 +37,23 @@ input_number:
     min: 1
     max: 300
     step: 1
+    initial: 170          # MEASURE: set just UNDER full travel (~180 s)
     unit_of_measurement: s
     icon: mdi:timer
-    # MEASURE: seconds for a full close->open at 5 RPM. Set after first jog.
   windowsopenerbedroom1_open_above:
-    name: Bedroom1 Window open above
+    name: Bedroom1 Window open above (bath)
     min: 10
     max: 35
     step: 0.5
+    initial: 27
     unit_of_measurement: "°C"
     icon: mdi:thermometer-high
   windowsopenerbedroom1_close_below:
-    name: Bedroom1 Window close below
+    name: Bedroom1 Window close below (bath)
     min: 5
     max: 30
     step: 0.5
+    initial: 20
     unit_of_measurement: "°C"
     icon: mdi:thermometer-low
 
@@ -49,7 +62,7 @@ template:
       - name: "Windows Opener Bedroom 1"
         unique_id: windowsopenerbedroom1
         device_class: window
-        optimistic: true            # no feedback: assume state from last command
+        optimistic: true
         open_cover:
           - service: light.turn_off                                   # interlock: close relay OFF first
             target: { entity_id: light.windowopenerbedroom1_light }
@@ -57,7 +70,7 @@ template:
             target: { entity_id: light.windowopenerbedroom1_light_2 }
           - delay:
               seconds: "{{ states('input_number.windowsopenerbedroom1_travel') | int(180) }}"
-          - service: light.turn_off                                   # auto-stop at end of travel
+          - service: light.turn_off
             target: { entity_id: light.windowopenerbedroom1_light_2 }
         close_cover:
           - service: light.turn_off                                   # interlock: open relay OFF first
@@ -76,7 +89,7 @@ template:
                 - light.windowopenerbedroom1_light_2
 
 automation:
-  # Safety: never leave both relays energised (the forbidden R1+R2 state)
+  # Safety: never leave both relays energised at HA start
   - alias: "Bedroom1 Window - relays off on HA start"
     id: windowsopenerbedroom1_init
     trigger:
@@ -90,33 +103,67 @@ automation:
             - light.windowopenerbedroom1_light_2
     mode: single
 
-  - alias: "Bedroom1 Window - open when warm"
-    id: windowsopenerbedroom1_open_warm
+  # OPEN: bath > 27 C  AND  outside 15..25 C
+  - alias: "Bedroom1 Window - OPEN (bath>27 & outside 15-25)"
+    id: windowsopenerbedroom1_open
     trigger:
-      - platform: numeric_state
-        entity_id: sensor.invisoutlet_temperature   # InvisMasterBath (ensuite); use _2 for SpareBath        # <-- set to your bedroom temperature sensor
+      - platform: numeric_state                       # bath crosses above threshold
+        entity_id: sensor.invisoutlet_temperature
         above: input_number.windowsopenerbedroom1_open_above
+        for: "00:05:00"
+      - platform: numeric_state                       # OR outside enters the 15..25 band while bath already hot
+        entity_id: weather.forecast_home
+        attribute: temperature
+        above: 15
+        below: 25
         for: "00:05:00"
     condition:
       - condition: state
+        entity_id: input_boolean.windowsopenerbedroom1_auto
+        state: "on"
+      - condition: state
         entity_id: cover.windows_opener_bedroom_1
         state: closed
+      - condition: numeric_state
+        entity_id: sensor.invisoutlet_temperature
+        above: input_number.windowsopenerbedroom1_open_above
+      - condition: numeric_state                      # outside 15..25
+        entity_id: weather.forecast_home
+        attribute: temperature
+        above: 15
+        below: 25
     action:
       - service: cover.open_cover
         target: { entity_id: cover.windows_opener_bedroom_1 }
     mode: single
 
-  - alias: "Bedroom1 Window - close when cool"
-    id: windowsopenerbedroom1_close_cool
+  # CLOSE: bath <= 20 C  AND  (outside 20..40 C  OR  outside -40..15 C)
+  - alias: "Bedroom1 Window - CLOSE (bath<=20 & outside 20-40 or -40-15)"
+    id: windowsopenerbedroom1_close
     trigger:
-      - platform: numeric_state
-        entity_id: sensor.invisoutlet_temperature   # InvisMasterBath (ensuite); use _2 for SpareBath        # <-- same bedroom temperature sensor
+      - platform: numeric_state                       # bath drops to/below threshold
+        entity_id: sensor.invisoutlet_temperature
         below: input_number.windowsopenerbedroom1_close_below
         for: "00:05:00"
     condition:
       - condition: state
+        entity_id: input_boolean.windowsopenerbedroom1_auto
+        state: "on"
+      - condition: state
         entity_id: cover.windows_opener_bedroom_1
         state: open
+      - condition: or                                 # outside hot (20..40) OR cold (-40..15)
+        conditions:
+          - condition: numeric_state
+            entity_id: weather.forecast_home
+            attribute: temperature
+            above: 20
+            below: 40
+          - condition: numeric_state
+            entity_id: weather.forecast_home
+            attribute: temperature
+            above: -40
+            below: 15
     action:
       - service: cover.close_cover
         target: { entity_id: cover.windows_opener_bedroom_1 }
